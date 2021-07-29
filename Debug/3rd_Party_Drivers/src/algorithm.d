@@ -1,5 +1,5 @@
-Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
- ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal.h \
+3rd_Party_Drivers/src/algorithm.o: ../3rd_Party_Drivers/src/algorithm.c \
+ ../Core/Inc/main.h ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal.h \
  ../Core/Inc/stm32f1xx_hal_conf.h \
  ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_rcc.h \
  ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_def.h \
@@ -27,9 +27,7 @@ Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
  ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_tim.h \
  ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_tim_ex.h \
  ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_uart.h \
- /Users/shayanrostamzade/STM32CubeIDE/workspace_1.6.1/Medical_Wrist_Band/3rd_Party_Drivers/inc/fonts.h \
- /Users/shayanrostamzade/STM32CubeIDE/workspace_1.6.1/Medical_Wrist_Band/3rd_Party_Drivers/inc/ssd1306.h \
- /Users/shayanrostamzade/STM32CubeIDE/workspace_1.6.1/Medical_Wrist_Band/3rd_Party_Drivers/inc/fonts.h \
+ /Users/shayanrostamzade/STM32CubeIDE/workspace_1.6.1/Medical_Wrist_Band/3rd_Party_Drivers/inc/algorithm.h \
  /Users/shayanrostamzade/STM32CubeIDE/workspace_1.6.1/Medical_Wrist_Band/3rd_Party_Drivers/inc/MAX30102.h
 
 ../Core/Inc/main.h:
@@ -90,10 +88,6 @@ Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
 
 ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_uart.h:
 
-/Users/shayanrostamzade/STM32CubeIDE/workspace_1.6.1/Medical_Wrist_Band/3rd_Party_Drivers/inc/fonts.h:
-
-/Users/shayanrostamzade/STM32CubeIDE/workspace_1.6.1/Medical_Wrist_Band/3rd_Party_Drivers/inc/ssd1306.h:
-
-/Users/shayanrostamzade/STM32CubeIDE/workspace_1.6.1/Medical_Wrist_Band/3rd_Party_Drivers/inc/fonts.h:
+/Users/shayanrostamzade/STM32CubeIDE/workspace_1.6.1/Medical_Wrist_Band/3rd_Party_Drivers/inc/algorithm.h:
 
 /Users/shayanrostamzade/STM32CubeIDE/workspace_1.6.1/Medical_Wrist_Band/3rd_Party_Drivers/inc/MAX30102.h:

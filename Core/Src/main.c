@@ -22,11 +22,17 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+
+
+//TODO provide the user to choose between the HR and SPO2 mode
+
+
 #include "fonts.h"
 #include "ssd1306.h"
 #include "stdio.h"
 #include "string.h"
-
+#include "MAX30102.h"
+//#include <stdbool.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -41,16 +47,28 @@
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
 
+#define NUM_BAT_ADC_READ_AVG		50
+#define SPO2ORHR_HR					0
+#define SPO2ORHR_SPO2				1
+
+#define TEST_Pin GPIO_PIN_15
+#define TEST_GPIO_Port GPIOB
+#define INT_Pin GPIO_PIN_9
+#define INT_GPIO_Port GPIOA
+#define INT_EXTI_IRQn EXTI9_5_IRQn
+
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc1;
 
 I2C_HandleTypeDef hi2c1;
+I2C_HandleTypeDef hi2c2;
 
 TIM_HandleTypeDef htim2;
+TIM_HandleTypeDef htim3;
 
-UART_HandleTypeDef huart1;
+UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
 
@@ -60,17 +78,33 @@ UART_HandleTypeDef huart1;
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_I2C1_Init(void);
-static void MX_USART1_UART_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_ADC1_Init(void);
+static void MX_USART2_UART_Init(void);
+static void MX_I2C2_Init(void);
+static void MX_TIM3_Init(void);
 /* USER CODE BEGIN PFP */
 
 float _BatteryVoltage(void);
+void _BluetoothSend(int32_t value, uint8_t SPO2_OR_HR);
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+// counter for battery ADC value reading
+uint8_t counter = 0;
+
+// Average battery voltage
+float BAT_Voltage_AVG = 0.00;
+
+// 100 ms interrupt
+uint8_t timer_3_interrupt = 0;
+
+// 200 ms interrupt
+uint8_t timer_2_interrupt = 0;
+
 
 /* USER CODE END 0 */
 
@@ -104,14 +138,19 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_I2C1_Init();
-  MX_USART1_UART_Init();
   MX_TIM2_Init();
   MX_ADC1_Init();
+  MX_USART2_UART_Init();
+  MX_I2C2_Init();
+  MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
 
-  HAL_TIM_Base_Start_IT(&htim2);
 
   SSD1306_Init();
+  HAL_TIM_Base_Start_IT(&htim2);
+  HAL_TIM_Base_Start_IT(&htim3);
+  Max30102_Init(&hi2c2);
+
 
   /* USER CODE END 2 */
 
@@ -119,29 +158,52 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    /* USER CODE END WHILE */
+	 Max30102_Task();
 
-    /* USER CODE BEGIN 3 */
+	 if(timer_3_interrupt)
+	 {
+		 // Sending the heart rate value with bluetooth
+		 _BluetoothSend(Max30102_GetHeartRate(), SPO2ORHR_HR);
+		 HAL_GPIO_TogglePin(User_Led_GPIO_Port, User_Led_Pin);
+		 timer_3_interrupt = 0;
+	 }
+
+	 if(timer_2_interrupt)
+	 {
 	  /*
 	   * Battery voltage exhibition section
 	   */
 	  // Setting the position for battery voltage on the display
-//	  SSD1306_SetPosition(5, 5);
-//	  SSD1306_PrintString("Bat_Vol: ", &Font_7x10, SSD1306_COLOR_WHITE);
-
+	  SSD1306_SetPosition(0, 0);
+	  SSD1306_PrintString("Bat_Vol: ", &Font_7x10, SSD1306_COLOR_WHITE);
+	  SSD1306_UpdateScreen();
 	  // Preparing to convert the float value into string to be shown on display
-//	  char voltageText[30];
-//	  sprintf(voltageText, "%.2f\r\n", _BatteryVoltage());
-//
-//	  //HAL_UART_Transmit(&huart1, &voltageText, strlen(voltageText), 100);
-//
-//	  // Printing the battery voltage value on display
-//	  SSD1306_SetPosition(9, 9);
-//	  SSD1306_PrintString(voltageText, &Font_7x10, SSD1306_COLOR_WHITE);
-//	  SSD1306_UpdateScreen();
-//	  HAL_Delay(500);
-//	  HAL_GPIO_TogglePin(User_Led_GPIO_Port, User_Led_Pin);
-//	  HAL_Delay(1000);
+	  char voltageText[10];
+
+	  float BAT_Voltage = _BatteryVoltage();
+	  BAT_Voltage_AVG += BAT_Voltage;
+	  counter++;
+
+	  if(counter == NUM_BAT_ADC_READ_AVG)
+	  {
+		  BAT_Voltage_AVG /= counter;
+		  sprintf(voltageText, "%.2f", BAT_Voltage_AVG);
+		  // Printing the battery voltage value on display
+		  SSD1306_SetPosition(63, 0);
+		  SSD1306_PrintString(voltageText, &Font_7x10, SSD1306_COLOR_WHITE);
+		  SSD1306_UpdateScreen();
+		  counter = 0;
+	  }
+
+
+	  // TODO read and normalize the SPO2 value
+	  _BluetoothSend(Max30102_GetSpO2Value(), SPO2ORHR_SPO2);
+
+	  timer_2_interrupt = 0;
+	 }
+    /* USER CODE END WHILE */
+
+    /* USER CODE BEGIN 3 */
  }
   /* USER CODE END 3 */
 }
@@ -271,6 +333,40 @@ static void MX_I2C1_Init(void)
 }
 
 /**
+  * @brief I2C2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_I2C2_Init(void)
+{
+
+  /* USER CODE BEGIN I2C2_Init 0 */
+
+  /* USER CODE END I2C2_Init 0 */
+
+  /* USER CODE BEGIN I2C2_Init 1 */
+
+  /* USER CODE END I2C2_Init 1 */
+  hi2c2.Instance = I2C2;
+  hi2c2.Init.ClockSpeed = 400000;
+  hi2c2.Init.DutyCycle = I2C_DUTYCYCLE_2;
+  hi2c2.Init.OwnAddress1 = 0;
+  hi2c2.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+  hi2c2.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+  hi2c2.Init.OwnAddress2 = 0;
+  hi2c2.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+  hi2c2.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+  if (HAL_I2C_Init(&hi2c2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN I2C2_Init 2 */
+
+  /* USER CODE END I2C2_Init 2 */
+
+}
+
+/**
   * @brief TIM2 Initialization Function
   * @param None
   * @retval None
@@ -289,7 +385,7 @@ static void MX_TIM2_Init(void)
 
   /* USER CODE END TIM2_Init 1 */
   htim2.Instance = TIM2;
-  htim2.Init.Prescaler = 35999;
+  htim2.Init.Prescaler = 1000-1;
   htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim2.Init.Period = 800;
   htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
@@ -316,35 +412,80 @@ static void MX_TIM2_Init(void)
 }
 
 /**
-  * @brief USART1 Initialization Function
+  * @brief TIM3 Initialization Function
   * @param None
   * @retval None
   */
-static void MX_USART1_UART_Init(void)
+static void MX_TIM3_Init(void)
 {
 
-  /* USER CODE BEGIN USART1_Init 0 */
+  /* USER CODE BEGIN TIM3_Init 0 */
 
-  /* USER CODE END USART1_Init 0 */
+  /* USER CODE END TIM3_Init 0 */
 
-  /* USER CODE BEGIN USART1_Init 1 */
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
 
-  /* USER CODE END USART1_Init 1 */
-  huart1.Instance = USART1;
-  huart1.Init.BaudRate = 115200;
-  huart1.Init.WordLength = UART_WORDLENGTH_8B;
-  huart1.Init.StopBits = UART_STOPBITS_1;
-  huart1.Init.Parity = UART_PARITY_NONE;
-  huart1.Init.Mode = UART_MODE_TX_RX;
-  huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-  huart1.Init.OverSampling = UART_OVERSAMPLING_16;
-  if (HAL_UART_Init(&huart1) != HAL_OK)
+  /* USER CODE BEGIN TIM3_Init 1 */
+
+  /* USER CODE END TIM3_Init 1 */
+  htim3.Instance = TIM3;
+  htim3.Init.Prescaler = 1000-1;
+  htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim3.Init.Period = 800;
+  htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
   {
     Error_Handler();
   }
-  /* USER CODE BEGIN USART1_Init 2 */
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim3, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM3_Init 2 */
 
-  /* USER CODE END USART1_Init 2 */
+  /* USER CODE END TIM3_Init 2 */
+
+}
+
+/**
+  * @brief USART2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART2_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART2_Init 0 */
+
+  /* USER CODE END USART2_Init 0 */
+
+  /* USER CODE BEGIN USART2_Init 1 */
+
+  /* USER CODE END USART2_Init 1 */
+  huart2.Instance = USART2;
+  huart2.Init.BaudRate = 9600;
+  huart2.Init.WordLength = UART_WORDLENGTH_8B;
+  huart2.Init.StopBits = UART_STOPBITS_1;
+  huart2.Init.Parity = UART_PARITY_NONE;
+  huart2.Init.Mode = UART_MODE_TX_RX;
+  huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart2.Init.OverSampling = UART_OVERSAMPLING_16;
+  if (HAL_UART_Init(&huart2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART2_Init 2 */
+
+  /* USER CODE END USART2_Init 2 */
 
 }
 
@@ -366,6 +507,9 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(User_Led_GPIO_Port, User_Led_Pin, GPIO_PIN_RESET);
 
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(Motor_GPIO_Port, Motor_Pin, GPIO_PIN_SET);
+
   /*Configure GPIO pin : User_Led_Pin */
   GPIO_InitStruct.Pin = User_Led_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
@@ -373,15 +517,22 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(User_Led_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : PB12 */
-  GPIO_InitStruct.Pin = GPIO_PIN_12;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  /*Configure GPIO pin : Motor_Pin */
+  GPIO_InitStruct.Pin = Motor_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(Motor_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : INT_Pin */
+  GPIO_InitStruct.Pin = INT_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(INT_GPIO_Port, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
-  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
+  HAL_NVIC_SetPriority(EXTI9_5_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
 
 }
 
@@ -412,28 +563,33 @@ float _BatteryVoltage(void){
 }
 
 
+void _BluetoothSend(int32_t value, uint8_t SPO2_OR_HR){
+	char UartBuffer[32];
+	if(SPO2_OR_HR)
+	{
+		sprintf(UartBuffer, "SpO2: %d\n", value);
+		HAL_UART_Transmit(&huart2, (uint8_t*)UartBuffer, strlen(UartBuffer), 100);
+	}
+
+	else{
+		sprintf(UartBuffer, "HR: %d\n", value);
+		HAL_UART_Transmit(&huart2, (uint8_t*)UartBuffer, strlen(UartBuffer), 100);
+	}
+}
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
+	if (GPIO_Pin == INT_Pin) {
+		Max30102_InterruptCallback();
+	}
+}
+
+
 // Timer_2 ISR
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim){
-  if(htim->Instance == TIM2){
-	  HAL_GPIO_TogglePin(User_Led_GPIO_Port, User_Led_Pin);
-
-	  /*
-	   * Battery voltage exhibition section
-	   */
-	  // Setting the position for battery voltage on the display
-	  SSD1306_SetPosition(0, 0);
-	  SSD1306_PrintString("Bat_Vol: ", &Font_7x10, SSD1306_COLOR_WHITE);
-
-	  // Preparing to convert the float value into string to be shown on display
-	  char voltageText[10];
-	  sprintf(voltageText, "%.2f", _BatteryVoltage());
-
-	  // Printing the battery voltage value on display
-	  SSD1306_SetPosition(63, 0);
-	  SSD1306_PrintString(voltageText, &Font_7x10, SSD1306_COLOR_WHITE);
-	  SSD1306_UpdateScreen();
-
-  }
+  if(htim->Instance == TIM2)
+	  timer_2_interrupt = 1;
+  else if(htim->Instance == TIM3)
+	  timer_3_interrupt = 1;
 }
 
 

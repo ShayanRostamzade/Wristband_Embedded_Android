@@ -60,6 +60,11 @@ void Error_Handler(void);
 /* Private defines -----------------------------------------------------------*/
 #define User_Led_Pin GPIO_PIN_13
 #define User_Led_GPIO_Port GPIOC
+#define Motor_Pin GPIO_PIN_1
+#define Motor_GPIO_Port GPIOB
+#define INT_Pin GPIO_PIN_9
+#define INT_GPIO_Port GPIOA
+#define INT_EXTI_IRQn EXTI9_5_IRQn
 /* USER CODE BEGIN Private defines */
 
 /* USER CODE END Private defines */
