@@ -48,8 +48,8 @@
 /* USER CODE BEGIN PM */
 
 #define NUM_BAT_ADC_READ_AVG		50
-#define SPO2ORHR_HR					0
-#define SPO2ORHR_SPO2				1
+#define SPO2ORHR_HR					7
+#define SPO2ORHR_SPO2				8
 
 #define TEST_Pin GPIO_PIN_15
 #define TEST_GPIO_Port GPIOB
@@ -87,6 +87,9 @@ static void MX_TIM3_Init(void);
 
 float _BatteryVoltage(void);
 void _BluetoothSend(int32_t value, uint8_t SPO2_OR_HR);
+void _Show_HeartRate_SPO2(uint8_t value, uint8_t SPO2_OR_HR);
+uint8_t _BluetoothReceive(void);
+void _BootUpSequence(void);
 
 /* USER CODE END PFP */
 
@@ -94,17 +97,25 @@ void _BluetoothSend(int32_t value, uint8_t SPO2_OR_HR);
 /* USER CODE BEGIN 0 */
 
 // counter for battery ADC value reading
-uint8_t counter = 0;
+uint8_t _counter = 0;
 
 // Average battery voltage
-float BAT_Voltage_AVG = 0.00;
+float _BAT_Voltage_AVG = 0.00;
 
-// 100 ms interrupt
-uint8_t timer_3_interrupt = 0;
+// 500 ms interrupt
+uint8_t _timer_3_interrupt = 0;
 
-// 200 ms interrupt
-uint8_t timer_2_interrupt = 0;
+// 300 ms interrupt
+uint8_t _timer_2_interrupt = 0;
 
+// User heart rate
+uint8_t _heartRate = 0;
+
+// User SPO2
+uint8_t _SPO2 = 0;
+
+// User input buffer
+uint8_t blueToothInput = 0;
 
 /* USER CODE END 0 */
 
@@ -125,7 +136,6 @@ int main(void)
 
   /* USER CODE BEGIN Init */
 
-
   /* USER CODE END Init */
 
   /* Configure the system clock */
@@ -145,6 +155,8 @@ int main(void)
   MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
 
+  // Boot up sequence
+  _BootUpSequence();
 
   SSD1306_Init();
   HAL_TIM_Base_Start_IT(&htim2);
@@ -160,46 +172,62 @@ int main(void)
   {
 	 Max30102_Task();
 
-	 if(timer_3_interrupt)
+	 if(_timer_3_interrupt)
 	 {
-		 // Sending the heart rate value with bluetooth
-		 _BluetoothSend(Max30102_GetHeartRate(), SPO2ORHR_HR);
-		 HAL_GPIO_TogglePin(User_Led_GPIO_Port, User_Led_Pin);
-		 timer_3_interrupt = 0;
+		 if(blueToothInput == SPO2ORHR_HR){
+			 _heartRate = (uint8_t)Max30102_GetHeartRate();
+
+			 // Sending the heart rate value with bluetooth
+			 _BluetoothSend(_heartRate, SPO2ORHR_HR);
+
+			 // Showing heart rate on the display
+			 _Show_HeartRate_SPO2(_heartRate, SPO2ORHR_HR);
+
+
+			 HAL_GPIO_TogglePin(User_Led_GPIO_Port, User_Led_Pin);
+		 }
+
+		 _timer_3_interrupt = 0;
 	 }
 
-	 if(timer_2_interrupt)
+	 if(_timer_2_interrupt)
 	 {
 	  /*
 	   * Battery voltage exhibition section
 	   */
-	  // Setting the position for battery voltage on the display
-	  SSD1306_SetPosition(0, 0);
-	  SSD1306_PrintString("Bat_Vol: ", &Font_7x10, SSD1306_COLOR_WHITE);
-	  SSD1306_UpdateScreen();
 	  // Preparing to convert the float value into string to be shown on display
 	  char voltageText[10];
-
 	  float BAT_Voltage = _BatteryVoltage();
-	  BAT_Voltage_AVG += BAT_Voltage;
-	  counter++;
+	  _BAT_Voltage_AVG += BAT_Voltage;
+	  _counter++;
 
-	  if(counter == NUM_BAT_ADC_READ_AVG)
+	  if(_counter == NUM_BAT_ADC_READ_AVG)
 	  {
-		  BAT_Voltage_AVG /= counter;
-		  sprintf(voltageText, "%.2f", BAT_Voltage_AVG);
+		  _BAT_Voltage_AVG /= _counter;
+		  sprintf(voltageText, "Bat_Vol: %.2f", _BAT_Voltage_AVG);
 		  // Printing the battery voltage value on display
-		  SSD1306_SetPosition(63, 0);
+		  SSD1306_SetPosition(0, 0);
 		  SSD1306_PrintString(voltageText, &Font_7x10, SSD1306_COLOR_WHITE);
 		  SSD1306_UpdateScreen();
-		  counter = 0;
+		  _counter = 0;
+	  }
+
+	  if(blueToothInput == SPO2ORHR_SPO2){
+		 // TODO read and normalize the SPO2 value
+
+		 _SPO2 = (uint8_t) Max30102_GetSpO2Value();
+
+		 // Sending the heart rate value with bluetooth
+		 _BluetoothSend(_SPO2, SPO2ORHR_SPO2);
+
+		 // Showing heart rate on the display
+		 _Show_HeartRate_SPO2(_SPO2, SPO2ORHR_SPO2);
 	  }
 
 
-	  // TODO read and normalize the SPO2 value
-	  _BluetoothSend(Max30102_GetSpO2Value(), SPO2ORHR_SPO2);
+	  //_BluetoothSend(Max30102_GetSpO2Value(), SPO2ORHR_SPO2);
 
-	  timer_2_interrupt = 0;
+	  _timer_2_interrupt = 0;
 	 }
     /* USER CODE END WHILE */
 
@@ -387,7 +415,7 @@ static void MX_TIM2_Init(void)
   htim2.Instance = TIM2;
   htim2.Init.Prescaler = 1000-1;
   htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim2.Init.Period = 800;
+  htim2.Init.Period = 2400;
   htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
@@ -432,7 +460,7 @@ static void MX_TIM3_Init(void)
   htim3.Instance = TIM3;
   htim3.Init.Prescaler = 1000-1;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim3.Init.Period = 800;
+  htim3.Init.Period = 4000;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
@@ -538,6 +566,51 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
+// Boot up sequence
+void _BootUpSequence(void){
+
+	SSD1306_SetPosition(0, 0);
+	SSD1306_PrintString("choose HR or SPO2", &Font_7x10, SSD1306_COLOR_WHITE);
+	SSD1306_UpdateScreen();
+
+	blueToothInput = _BluetoothReceive();
+	// Waiting till the user chooses the mode
+//	while(1){
+//		// Reading user's choice of HR or SPO2
+//		blueToothInput = _BluetoothReceive();
+//		if((blueToothInput == SPO2ORHR_HR) || (blueToothInput == SPO2ORHR_SPO2))
+//			break;
+//	}
+}
+
+// receiving the user choice of HR or SPO2
+uint8_t _BluetoothReceive(void){
+	uint8_t value = 0;
+	HAL_UART_Receive(&huart2, &value, sizeof(value), 5000);
+	return value;
+}
+
+// Get and show heart rate and blood oxygen level
+void _Show_HeartRate_SPO2(uint8_t value, uint8_t SPO2_OR_HR){
+
+	// if SPO2 is selected
+	if(SPO2_OR_HR == SPO2ORHR_SPO2){
+		char _valueText[9];
+		sprintf(_valueText, "SPO2:   %3d", value);
+		SSD1306_SetPosition(0, 25);
+		SSD1306_PrintString(_valueText, &Font_11x18, SSD1306_COLOR_WHITE);
+		SSD1306_UpdateScreen();
+	}
+	// if HR is selected
+	else if(SPO2_OR_HR == SPO2ORHR_HR){
+		char _valueText[9];
+		sprintf(_valueText, "BPM:    %3d", value);
+		SSD1306_SetPosition(0, 25);
+		SSD1306_PrintString(_valueText, &Font_11x18, SSD1306_COLOR_WHITE);
+		SSD1306_UpdateScreen();
+	}
+}
+
 
 // Battery voltage reading
 float _BatteryVoltage(void){
@@ -558,21 +631,21 @@ float _BatteryVoltage(void){
 	batteryVoltage = (rawAnalogVal * 2  / 4095.00) * 3.30;
 	// Removing some inefficiency
 	//batteryVoltage += 0.1;
-
+	HAL_ADC_Stop(&hadc1);
 	return batteryVoltage;
 }
 
 
 void _BluetoothSend(int32_t value, uint8_t SPO2_OR_HR){
 	char UartBuffer[32];
-	if(SPO2_OR_HR)
+	if(SPO2_OR_HR == SPO2ORHR_HR)
 	{
-		sprintf(UartBuffer, "SpO2: %d\n", value);
+		sprintf(UartBuffer, "HR: %d\n", value);
 		HAL_UART_Transmit(&huart2, (uint8_t*)UartBuffer, strlen(UartBuffer), 100);
 	}
 
-	else{
-		sprintf(UartBuffer, "HR: %d\n", value);
+	else if(SPO2_OR_HR == SPO2ORHR_SPO2){
+		sprintf(UartBuffer, "SPO2: %d\n", value);
 		HAL_UART_Transmit(&huart2, (uint8_t*)UartBuffer, strlen(UartBuffer), 100);
 	}
 }
@@ -587,9 +660,9 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 // Timer_2 ISR
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim){
   if(htim->Instance == TIM2)
-	  timer_2_interrupt = 1;
+	  _timer_2_interrupt = 1;
   else if(htim->Instance == TIM3)
-	  timer_3_interrupt = 1;
+	  _timer_3_interrupt = 1;
 }
 
 
