@@ -24,7 +24,7 @@
 /* USER CODE BEGIN Includes */
 
 
-//TODO provide the user to choose between the HR and SPO2 mode
+//TODO use a infinite loop till user enters the HR or SPO2 mode
 
 
 #include "fonts.h"
@@ -48,8 +48,8 @@
 /* USER CODE BEGIN PM */
 
 #define NUM_BAT_ADC_READ_AVG		50
-#define SPO2ORHR_HR					7
-#define SPO2ORHR_SPO2				8
+#define SPO2ORHR_HR					'h'
+#define SPO2ORHR_SPO2				's'
 
 #define TEST_Pin GPIO_PIN_15
 #define TEST_GPIO_Port GPIOB
@@ -86,9 +86,9 @@ static void MX_TIM3_Init(void);
 /* USER CODE BEGIN PFP */
 
 float _BatteryVoltage(void);
-void _BluetoothSend(int32_t value, uint8_t SPO2_OR_HR);
+void _BluetoothSend(uint8_t value, uint8_t SPO2_OR_HR);
 void _Show_HeartRate_SPO2(uint8_t value, uint8_t SPO2_OR_HR);
-uint8_t _BluetoothReceive(void);
+char _BluetoothReceive(void);
 void _BootUpSequence(void);
 
 /* USER CODE END PFP */
@@ -115,7 +115,7 @@ uint8_t _heartRate = 0;
 uint8_t _SPO2 = 0;
 
 // User input buffer
-uint8_t blueToothInput = 0;
+char blueToothInput;
 
 /* USER CODE END 0 */
 
@@ -584,8 +584,8 @@ void _BootUpSequence(void){
 }
 
 // receiving the user choice of HR or SPO2
-uint8_t _BluetoothReceive(void){
-	uint8_t value = 0;
+char _BluetoothReceive(void){
+	char value;
 	HAL_UART_Receive(&huart2, &value, sizeof(value), 5000);
 	return value;
 }
@@ -636,17 +636,20 @@ float _BatteryVoltage(void){
 }
 
 
-void _BluetoothSend(int32_t value, uint8_t SPO2_OR_HR){
-	char UartBuffer[32];
+void _BluetoothSend(uint8_t value, uint8_t SPO2_OR_HR){
+	char UartBuffer[8];
+	//uint8_t val = (uint8_t)value;
 	if(SPO2_OR_HR == SPO2ORHR_HR)
 	{
-		sprintf(UartBuffer, "HR: %d\n", value);
+		sprintf(UartBuffer, "%d",  value);
 		HAL_UART_Transmit(&huart2, (uint8_t*)UartBuffer, strlen(UartBuffer), 100);
+		HAL_Delay(100);
 	}
 
 	else if(SPO2_OR_HR == SPO2ORHR_SPO2){
-		sprintf(UartBuffer, "SPO2: %d\n", value);
+		sprintf(UartBuffer, "%d", value);
 		HAL_UART_Transmit(&huart2, (uint8_t*)UartBuffer, strlen(UartBuffer), 100);
+		HAL_Delay(100);
 	}
 }
 
