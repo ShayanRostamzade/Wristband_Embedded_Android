@@ -48,8 +48,18 @@
 /* USER CODE BEGIN PM */
 
 #define NUM_BAT_ADC_READ_AVG		50
+// Minimum allowed voltage for the battery
+// to function properly proportional to NUM_BAT_ADC_READ_AVG
+// which is equal to 3.6 * NUM_BAT_ADC_READ_AVG
+#define MIN_ALLOWED_VOLTAGE_SUM 	180	//(3.6 * NUM_BAT_ADC_READ_AVG)
 #define SPO2ORHR_HR					'h'
 #define SPO2ORHR_SPO2				's'
+
+#define maxSampleCheck				30
+#define HRMAX						115
+#define HRMIN						70
+#define SPO2MAX						100
+#define SPO2MIN						95
 
 #define TEST_Pin GPIO_PIN_15
 #define TEST_GPIO_Port GPIOB
@@ -90,6 +100,7 @@ void _BluetoothSend(uint8_t value, uint8_t SPO2_OR_HR);
 void _Show_HeartRate_SPO2(uint8_t value, uint8_t SPO2_OR_HR);
 char _BluetoothReceive(void);
 void _BootUpSequence(void);
+void _Check_HR_SPO2(uint8_t data, char selectedMode);
 
 /* USER CODE END PFP */
 
@@ -113,6 +124,11 @@ uint8_t _heartRate = 0;
 
 // User SPO2
 uint8_t _SPO2 = 0;
+
+// The initiated values to warn the user
+uint8_t dangerZoneDataSum = 0;
+uint8_t dangerZoneDataCnt = 0;
+
 
 // User input buffer
 char blueToothInput;
@@ -155,13 +171,21 @@ int main(void)
   MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
 
-  // Boot up sequence
-  _BootUpSequence();
 
   SSD1306_Init();
   HAL_TIM_Base_Start_IT(&htim2);
   HAL_TIM_Base_Start_IT(&htim3);
   Max30102_Init(&hi2c2);
+
+  // Boot up sequence
+    _BootUpSequence();
+
+  // Refresh the OLED display
+	SSD1306_Clear();
+	SSD1306_UpdateScreen();
+
+  // Resetting the state of the vibrarion motor
+	HAL_GPIO_WritePin(Motor_GPIO_Port, Motor_Pin, GPIO_PIN_RESET);
 
 
   /* USER CODE END 2 */
@@ -182,6 +206,9 @@ int main(void)
 
 			 // Showing heart rate on the display
 			 _Show_HeartRate_SPO2(_heartRate, SPO2ORHR_HR);
+
+			 // Checking HR and SPO2
+			 _Check_HR_SPO2(_heartRate, SPO2ORHR_HR);
 
 
 			 HAL_GPIO_TogglePin(User_Led_GPIO_Port, User_Led_Pin);
@@ -209,11 +236,22 @@ int main(void)
 		  SSD1306_SetPosition(0, 0);
 		  SSD1306_PrintString(voltageText, &Font_7x10, SSD1306_COLOR_WHITE);
 		  SSD1306_UpdateScreen();
+
+		  // Checking if the battery voltage is low
+		  if(_BAT_Voltage_AVG <= MIN_ALLOWED_VOLTAGE_SUM){
+
+			  // Printing the warning message
+			  //SSD1306_Clear();
+			  SSD1306_SetPosition(0, 90);
+			  SSD1306_PrintString("Low BAT.", &Font_7x10, SSD1306_COLOR_WHITE);
+			  SSD1306_UpdateScreen();
+		  }
+
+
 		  _counter = 0;
 	  }
 
 	  if(blueToothInput == SPO2ORHR_SPO2){
-		 // TODO read and normalize the SPO2 value
 
 		 _SPO2 = (uint8_t) Max30102_GetSpO2Value();
 
@@ -222,10 +260,11 @@ int main(void)
 
 		 // Showing heart rate on the display
 		 _Show_HeartRate_SPO2(_SPO2, SPO2ORHR_SPO2);
+
+		 // Checking HR and SPO2
+		 _Check_HR_SPO2(_SPO2, SPO2ORHR_SPO2);
 	  }
 
-
-	  //_BluetoothSend(Max30102_GetSpO2Value(), SPO2ORHR_SPO2);
 
 	  _timer_2_interrupt = 0;
 	 }
@@ -573,14 +612,15 @@ void _BootUpSequence(void){
 	SSD1306_PrintString("choose HR or SPO2", &Font_7x10, SSD1306_COLOR_WHITE);
 	SSD1306_UpdateScreen();
 
-	blueToothInput = _BluetoothReceive();
+	//blueToothInput = _BluetoothReceive();
+
 	// Waiting till the user chooses the mode
-//	while(1){
-//		// Reading user's choice of HR or SPO2
-//		blueToothInput = _BluetoothReceive();
-//		if((blueToothInput == SPO2ORHR_HR) || (blueToothInput == SPO2ORHR_SPO2))
-//			break;
-//	}
+	while(1){
+		// Reading user's choice of HR or SPO2
+		blueToothInput = _BluetoothReceive();
+		if((blueToothInput == SPO2ORHR_HR) || (blueToothInput == SPO2ORHR_SPO2))
+			break;
+	}
 }
 
 // receiving the user choice of HR or SPO2
@@ -667,6 +707,68 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim){
   else if(htim->Instance == TIM3)
 	  _timer_3_interrupt = 1;
 }
+
+// CHecking the HR and SPO2
+void _Check_HR_SPO2(uint8_t data, char selectedMode){
+        //heart rate has been selected
+        if(selectedMode == SPO2ORHR_HR) {
+            // heart rate exceeds the natural level
+            if (data > HRMAX) {
+                dangerZoneDataCnt++;
+                if (dangerZoneDataCnt < maxSampleCheck) {
+                    dangerZoneDataSum += data;
+                }
+                if (dangerZoneDataSum > HRMAX * maxSampleCheck) {
+                	// Setup the vibration motor
+                	HAL_GPIO_WritePin(Motor_GPIO_Port, Motor_Pin, GPIO_PIN_SET);
+                }
+            }
+
+            // heart rate is less than natural level minimum
+            else if (data < HRMIN) {
+                dangerZoneDataCnt++;
+                if (dangerZoneDataCnt < maxSampleCheck) {
+                    dangerZoneDataSum += data;
+                }
+                if (dangerZoneDataSum < HRMIN * maxSampleCheck) {
+                    // Setup the vibration motor
+                	HAL_GPIO_WritePin(Motor_GPIO_Port, Motor_Pin, GPIO_PIN_SET);
+                }
+            }
+            else{
+                dangerZoneDataCnt = 0;
+            }
+        }
+            // oxygen level has been selected
+            else if(selectedMode == SPO2ORHR_SPO2){
+                // oxygen level exceeds the natural level
+                if(data > SPO2MAX){
+                    dangerZoneDataCnt++;
+                    if (dangerZoneDataCnt < maxSampleCheck){
+                        dangerZoneDataSum += data;
+                    }
+                    if (dangerZoneDataSum > SPO2MAX * maxSampleCheck){
+                    	// Setup the vibration motor
+                    	HAL_GPIO_WritePin(Motor_GPIO_Port, Motor_Pin, GPIO_PIN_SET);
+                    }
+                }
+
+                // oxygen level is less than natural level minimum
+                else if(data < SPO2MIN) {
+                    dangerZoneDataCnt++;
+                    if (dangerZoneDataCnt < maxSampleCheck) {
+                        dangerZoneDataSum += data;
+                    }
+                    if (dangerZoneDataSum < SPO2MIN * maxSampleCheck) {
+                    	// Setup the vibration motor
+                    	HAL_GPIO_WritePin(Motor_GPIO_Port, Motor_Pin, GPIO_PIN_SET);
+                    }
+                }
+                else{
+                    dangerZoneDataCnt = 0;
+                }
+        }
+    }
 
 
 /* USER CODE END 4 */
